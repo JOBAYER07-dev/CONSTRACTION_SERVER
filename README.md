@@ -4,8 +4,8 @@ Backend API for **ConstructIQ AI**, an AI-powered construction cost estimation a
 
 ## 🌐 Live Links
 
-- **Frontend:** https://construct-iq-ai.vercel.app/
-- **Backend API:** https://construct-iq-ai-server.vercel.app
+- **Frontend:** https://constraction-client.vercel.app/
+- **Backend API:** https://your-backend-url.onrender.com
 
 ---
 
@@ -19,7 +19,6 @@ Backend API for **ConstructIQ AI**, an AI-powered construction cost estimation a
 - 🗄 MongoDB Database Integration
 - 🌍 CORS Configuration for Frontend
 - ⚡ Built with Express.js & TypeScript
-- ☁️ Vercel Serverless Deployment
 
 ---
 
@@ -38,8 +37,6 @@ Backend API for **ConstructIQ AI**, an AI-powered construction cost estimation a
 - CORS
 
 ---
-
-
 
 # ⚙️ Environment Variables
 
@@ -60,13 +57,13 @@ GROQ_API_KEY=your_groq_api_key
 Clone the repository
 
 ```bash
-git clone https://github.com/your-username/construct-iq-ai-server.git
+git clone https://github.com/JOBAYER07-dev/CONSTRACTION_SERVER.git
 ```
 
 Move into the project
 
 ```bash
-cd construct-iq-ai-server
+cd CONSTRACTION_SERVER
 ```
 
 Install dependencies
@@ -100,7 +97,7 @@ npm start
 ## Base URL
 
 ```
-https://construct-iq-ai-server.vercel.app
+https://your-backend-url.onrender.com
 ```
 
 ---
@@ -230,7 +227,7 @@ Session
 
 Backend deployed on
 
-- Vercel
+- Render
 
 Database
 
@@ -240,18 +237,18 @@ Database
 
 # 👨‍💻 Author
 
-**Aritro Mazumdar**
+**Jobayer Hosen**
 
-Frontend Developer
+Full-Stack Developer
 
 GitHub:
-https://github.com/AritraApon
+https://github.com/JOBAYER07-dev
 
 Portfolio:
-https://protfolio-page-one.vercel.app/
+https://jobayerhosen-portfolio.vercel.app
 
 LinkedIn:
-https://www.linkedin.com/in/aritro-mazumdar-011206apon
+https://www.linkedin.com/in/jobayer-dev
 
 ---
 
