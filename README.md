@@ -1,6 +1,6 @@
-# 🏗️ ConstructIQ AI - Backend Server
+# 🏗️ constractiON AI - Backend Server
 
-Backend API for **ConstructIQ AI**, an AI-powered construction cost estimation and project management platform. This server provides authentication, AI-generated construction estimates, project management APIs, and an intelligent construction assistant powered by Groq AI.
+Backend API for **constractiON AI**, an AI-powered construction cost estimation and project management platform. This server provides authentication, AI-generated construction estimates, project management APIs, and an intelligent construction assistant powered by Groq AI.
 
 ## 🌐 Live Links
 
