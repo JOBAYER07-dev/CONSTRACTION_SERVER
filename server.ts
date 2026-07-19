@@ -10,12 +10,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors({
-  origin: 'https://construct-iq-ai.vercel.app',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
-}));
+app.use(
+  cors({
+    origin: ['http://localhost:3000', 'https://constraction-client.vercel.app'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+  }),
+);
 app.use(express.json());
 
 // Initialize Groq AI
@@ -216,8 +218,8 @@ app.post('/api/projects/add', authenticateToken as any, async (req: AuthRequest,
 app.get('/api/projects', async (req: AuthRequest, res: Response) => {
   try {
     await connectDB();
-    const { search, buildingType } = req.query;
-    let query: any = {};
+    const { search, buildingType, location, sortBy } = req.query;
+    const query: Record<string, unknown> = {};
 
     if (search) {
       query.title = { $regex: search, $options: 'i' };
@@ -225,8 +227,16 @@ app.get('/api/projects', async (req: AuthRequest, res: Response) => {
     if (buildingType) {
       query.buildingType = buildingType;
     }
+    if (location) {
+      query.location = { $regex: location, $options: 'i' };
+    }
 
-    const projects = await Project.find(query).sort({ createdAt: -1 });
+    let sortOption: Record<string, 1 | -1> = { createdAt: -1 };
+    if (sortBy === 'oldest') sortOption = { createdAt: 1 };
+    else if (sortBy === 'area_asc') sortOption = { area: 1 };
+    else if (sortBy === 'area_desc') sortOption = { area: -1 };
+
+    const projects = await Project.find(query).sort(sortOption);
     res.status(200).json({ success: true, data: projects });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch projects' });

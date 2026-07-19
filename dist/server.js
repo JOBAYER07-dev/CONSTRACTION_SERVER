@@ -140,12 +140,10 @@ app.post('/api/projects/add', authenticateToken, async (req, res) => {
   try {
     const { title, image, area, buildingType, location, userId } = req.body;
     if (!title || !image || !area || !buildingType || !location || !userId) {
-      res
-        .status(400)
-        .json({
-          success: false,
-          error: 'All fields are required including userId',
-        });
+      res.status(400).json({
+        success: false,
+        error: 'All fields are required including userId',
+      });
       return;
     }
     const prompt = `You are an expert civil engineer and cost estimator. 
@@ -249,12 +247,10 @@ app.post('/api/ai/chat', async (req, res) => {
       messages: [{ role: 'user', content: prompt }],
       model: 'llama-3.3-70b-versatile',
     });
-    res
-      .status(200)
-      .json({
-        success: true,
-        reply: chatCompletion.choices[0]?.message?.content,
-      });
+    res.status(200).json({
+      success: true,
+      reply: chatCompletion.choices[0]?.message?.content,
+    });
   } catch (error) {
     console.error('AI Chat Error:', error);
     res.status(500).json({ success: false, error: 'AI failed to respond' });
