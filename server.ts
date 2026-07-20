@@ -38,7 +38,7 @@ const connectDB = async (): Promise<any> => {
     }
 
     const con = await mongoose.connect(dbUri, {
-      dbName: 'ConstructIQ',
+      dbName: 'constructiON',
       bufferCommands: false, // সার্ভারলেস এনভায়রনমেন্টের জন্য ফলস রাখা বেস্ট
     });
 
@@ -171,14 +171,111 @@ const authenticateToken = async (
 app.get('/', async (req: Request, res: Response) => {
   try {
     await connectDB();
-    res.send('ConstructIQ AI Server is running via Groq!');
+    res.send('constructiON AI Server is running via Groq!');
   } catch (err) {
     res.status(500).send('Server status: Database Connection Failing');
   }
 });
 
+// --- AI Prompt Builder (supports custom prompt templates + adjustable output length) ---
+type PromptStyle = 'standard' | 'detailed' | 'summary';
+type OutputLength = 'short' | 'standard' | 'detailed';
+
+const STYLE_INSTRUCTIONS: Record<PromptStyle, string> = {
+  standard:
+    'Write as a professional structural cost estimation report with clear Markdown headers (###) and bullet points.',
+  detailed:
+    'Write as a highly detailed technical breakdown, including brief reasoning for each material quantity (e.g. why that much cement/steel is needed for this area and building type), using Markdown headers (###) and bullet points.',
+  summary:
+    'Write as a concise executive summary aimed at a non-technical client — plain language, short bullet points, minimal jargon.',
+};
+
+const LENGTH_INSTRUCTIONS: Record<OutputLength, string> = {
+  short:
+    'Keep the entire response brief — around 120-180 words total. Only include the core material quantities and the total budget.',
+  standard:
+    'Keep the entire response moderate in length — around 250-350 words total.',
+  detailed:
+    'Provide a thorough response — around 450-600 words total, including a short breakdown explanation for each material category.',
+};
+
+const buildEstimatePrompt = (
+  area: number | string,
+  buildingType: string,
+  location: string,
+  promptStyle: PromptStyle = 'standard',
+  outputLength: OutputLength = 'standard',
+): string => {
+  const styleInstruction =
+    STYLE_INSTRUCTIONS[promptStyle] || STYLE_INSTRUCTIONS.standard;
+  const lengthInstruction =
+    LENGTH_INSTRUCTIONS[outputLength] || LENGTH_INSTRUCTIONS.standard;
+
+  return `You are an expert civil engineer and cost estimator.
+Create a structural material and cost estimation for a ${area} sqft ${buildingType} building located in ${location}.
+Provide estimated breakdown quantities for: Cement (bags), Steel (tons), Sand (cft), Bricks (pcs), and Total Estimated Budget in BDT.
+${styleInstruction}
+${lengthInstruction}
+Do not include introductory chit-chat, start directly with the report.`;
+};
+
 /**
- * FEATURE A: AI Cost & Material Generator + Save Project (🔒 Secured)
+ * FEATURE A (part 1): AI Estimate Generator — PREVIEW ONLY, no DB write.
+ * Lets the client generate/regenerate an estimate (with a chosen prompt style
+ * and output length) before committing to a final save.
+ */
+app.post(
+  '/api/ai/generate-estimate',
+  authenticateToken as any,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { area, buildingType, location, promptStyle, outputLength } =
+        req.body as {
+          area?: number | string;
+          buildingType?: string;
+          location?: string;
+          promptStyle?: PromptStyle;
+          outputLength?: OutputLength;
+        };
+
+      if (!area || !buildingType || !location) {
+        res.status(400).json({
+          success: false,
+          error:
+            'area, buildingType and location are required to generate an estimate',
+        });
+        return;
+      }
+
+      const prompt = buildEstimatePrompt(
+        area,
+        buildingType,
+        location,
+        promptStyle,
+        outputLength,
+      );
+
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'llama-3.3-70b-versatile',
+      });
+
+      const generatedText =
+        chatCompletion.choices[0]?.message?.content ||
+        'Failed to generate estimate due to an AI error.';
+
+      res.status(200).json({ success: true, estimate: generatedText });
+    } catch (error) {
+      console.error('Generate Estimate Error:', error);
+      res
+        .status(500)
+        .json({ success: false, error: 'Failed to generate estimate' });
+    }
+  },
+);
+
+/**
+ * FEATURE A (part 2): AI Cost & Material Generator + Save Project (🔒 Secured)
  */
 app.post(
   '/api/projects/add',
@@ -194,6 +291,9 @@ app.post(
         buildingType,
         location,
         userId,
+        aiEstimate: preGeneratedEstimate,
+        promptStyle,
+        outputLength,
       } = req.body;
 
       if (
@@ -213,20 +313,32 @@ app.post(
         return;
       }
 
-      const prompt = `You are an expert civil engineer and cost estimator. 
-    Create a highly detailed, professional structural material and cost estimation for a ${area} sqft ${buildingType} building located in ${location}. 
-    Provide estimated breakdown quantities for: Cement (bags), Steel (tons), Sand (cft), Bricks (pcs), and Total Estimated Budget in BDT.
-    Format the response using clean Markdown headers (###) and bullet points. Do not include introductory chit-chat, start directly with the report.`;
+      // If the client already generated (and possibly regenerated) an estimate
+      // during the preview step, reuse it instead of calling the AI again.
+      let generatedText: string = preGeneratedEstimate;
 
-      // Call Groq API
-      const chatCompletion = await groq.chat.completions.create({
-        messages: [{ role: 'user', content: prompt }],
-        model: 'llama-3.3-70b-versatile',
-      });
+      if (
+        !generatedText ||
+        typeof generatedText !== 'string' ||
+        !generatedText.trim()
+      ) {
+        const prompt = buildEstimatePrompt(
+          area,
+          buildingType,
+          location,
+          promptStyle,
+          outputLength,
+        );
 
-      const generatedText =
-        chatCompletion.choices[0]?.message?.content ||
-        'Failed to generate estimate due to an AI error.';
+        const chatCompletion = await groq.chat.completions.create({
+          messages: [{ role: 'user', content: prompt }],
+          model: 'llama-3.3-70b-versatile',
+        });
+
+        generatedText =
+          chatCompletion.choices[0]?.message?.content ||
+          'Failed to generate estimate due to an AI error.';
+      }
 
       // Ensure database is ready before creating a model document
       await connectDB();
@@ -339,32 +451,62 @@ app.delete(
 /**
  * FEATURE C: AI Smart Construction Assistant / Chatbot
  */
+interface ChatHistoryItem {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+const MAX_HISTORY_MESSAGES = 12; // cap context sent to the model (last N turns)
+
 app.post(
   '/api/ai/chat',
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-      const { message } = req.body;
+      const { message, history } = req.body as {
+        message?: string;
+        history?: ChatHistoryItem[];
+      };
 
       if (!message) {
         res.status(400).json({ success: false, error: 'Message is required' });
         return;
       }
 
-      const prompt = `You are "ConstructIQ AI Assistant", a smart civil engineering companion. 
-    Answer the user's question accurately regarding construction guidelines, building codes, material estimation, or cost optimization.
-    User Question: "${message}"`;
+      const systemPrompt = `You are "constructiON AI Assistant", a smart civil engineering companion embedded inside the constructiON platform.
+Answer the user's questions accurately regarding construction guidelines, building codes, material estimation, and cost optimization.
+You have access to the full conversation so far — use earlier messages to understand follow-up questions
+(e.g. "what about steel?" after discussing cement should be understood in context).
+Keep answers concise, practical, and focused on civil engineering / construction topics.`;
+
+      // Sanitize + cap the incoming history so a bad payload can't blow up the context window
+      const safeHistory: ChatHistoryItem[] = Array.isArray(history)
+        ? history
+            .filter(
+              h =>
+                h &&
+                (h.role === 'user' || h.role === 'assistant') &&
+                typeof h.content === 'string' &&
+                h.content.trim().length > 0,
+            )
+            .slice(-MAX_HISTORY_MESSAGES)
+        : [];
 
       const chatCompletion = await groq.chat.completions.create({
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...safeHistory.map(h => ({
+            role: h.role,
+            content: h.content,
+          })),
+          { role: 'user', content: message },
+        ],
         model: 'llama-3.3-70b-versatile',
       });
 
-      res
-        .status(200)
-        .json({
-          success: true,
-          reply: chatCompletion.choices[0]?.message?.content,
-        });
+      res.status(200).json({
+        success: true,
+        reply: chatCompletion.choices[0]?.message?.content,
+      });
     } catch (error) {
       console.error('AI Chat Error:', error);
       res.status(500).json({ success: false, error: 'AI failed to respond' });
