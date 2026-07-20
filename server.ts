@@ -39,7 +39,7 @@ const connectDB = async (): Promise<any> => {
 
     const con = await mongoose.connect(dbUri, {
       dbName: 'constructiON',
-      bufferCommands: false, // সার্ভারলেস এনভায়রনমেন্টের জন্য ফলস রাখা বেস্ট
+      bufferCommands: false, // Disable mongoose buffering to avoid memory leaks in serverless environments
     });
 
     isConnected = !!con.connections[0].readyState;
@@ -97,7 +97,7 @@ const authenticateToken = async (
       return;
     }
 
-    // 🌟 এখানে অন-ডিমান্ড ডাটাবেজ কানেক্ট হবে, তাই কখনো কানেকশন ড্রপ করবে না
+    // Ensure database connection is ready before proceeding
     await connectDB();
     if (mongoose.connection.readyState !== 1) {
       res.status(500).json({
@@ -114,7 +114,7 @@ const authenticateToken = async (
     // pool, but point at the correct logical database for this lookup.
     const authDb = mongoose.connection.getClient().db('better-auth');
 
-    // ১. ডাটাবেজের 'session' কালেকশনে টোকেন চেক
+    // 1. read the session document from the 'session' collection using the token
     const sessionDoc = await authDb
       .collection('session')
       .findOne({ token: token });
@@ -126,13 +126,13 @@ const authenticateToken = async (
       return;
     }
 
-    // সেশন এক্সপায়ার ডেট ভ্যালিডেশন
+    // Session expiration validation
     if (new Date(sessionDoc.expiresAt) < new Date()) {
       res.status(403).json({ success: false, error: 'Session has expired.' });
       return;
     }
 
-    // ২. সেশনের userId দিয়ে 'user' কালেকশন থেকে ডাটা রিড করা
+    // 2. Read user data from the 'user' collection using the session's userId
     const searchUserId = sessionDoc.userId.toString();
     let userObjectId: any = null;
 
@@ -159,7 +159,7 @@ const authenticateToken = async (
       return;
     }
 
-    // রিকোয়েস্ট অবজেক্টে ইউজারের ডাটা পুশ
+    // Push user data into the request object
     req.user = {
       id: userDoc._id.toString(),
       email: userDoc.email,
