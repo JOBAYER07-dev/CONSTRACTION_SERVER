@@ -458,40 +458,126 @@ interface ChatHistoryItem {
 
 const MAX_HISTORY_MESSAGES = 12; // cap context sent to the model (last N turns)
 
+/**
+ * Small helper: ask the model for exactly 3 short, natural follow-up
+ * questions based on the exchange that just happened. Kept as a separate,
+ * cheap, non-streaming call so it never blocks or corrupts the main reply.
+ */
+const generateFollowUpSuggestions = async (
+  userMessage: string,
+  assistantReply: string,
+): Promise<string[]> => {
+  try {
+    const suggestionCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You generate exactly 3 short, natural follow-up questions (max 8 words each) ' +
+            'that a user might realistically ask next in a civil engineering / construction chat. ' +
+            'Respond with ONLY a raw JSON object of the exact shape {"suggestions": ["...", "...", "..."]} ' +
+            '— no markdown, no code fences, no extra keys, no explanation.',
+        },
+        {
+          role: 'user',
+          content: `User asked: "${userMessage}"\nAssistant replied: "${assistantReply}"\n\nGive the JSON object with 3 short follow-up questions.`,
+        },
+      ],
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.7,
+      max_tokens: 200,
+      response_format: { type: 'json_object' },
+    });
+
+    const raw = suggestionCompletion.choices[0]?.message?.content || '';
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Model occasionally wraps the JSON in prose/code fences despite
+      // instructions — fall back to pulling out the first {...} or [...] block.
+      const objectMatch = raw.match(/\{[\s\S]*\}/);
+      const arrayMatch = raw.match(/\[[\s\S]*\]/);
+      const candidate = objectMatch?.[0] || arrayMatch?.[0];
+      if (!candidate) {
+        console.error(
+          'Follow-up suggestions: no JSON found in model output:',
+          raw,
+        );
+        return [];
+      }
+      parsed = JSON.parse(candidate);
+    }
+
+    const list: unknown = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { suggestions?: unknown })?.suggestions;
+
+    if (Array.isArray(list)) {
+      return list
+        .filter(
+          (s): s is string => typeof s === 'string' && s.trim().length > 0,
+        )
+        .map(s => s.trim())
+        .slice(0, 3);
+    }
+
+    console.error('Follow-up suggestions: unexpected shape from model:', raw);
+    return [];
+  } catch (err) {
+    console.error('Follow-up Suggestion Error:', err);
+    return [];
+  }
+};
+
 app.post(
   '/api/ai/chat',
   async (req: AuthRequest, res: Response): Promise<void> => {
-    try {
-      const { message, history } = req.body as {
-        message?: string;
-        history?: ChatHistoryItem[];
-      };
+    const { message, history } = req.body as {
+      message?: string;
+      history?: ChatHistoryItem[];
+    };
 
-      if (!message) {
-        res.status(400).json({ success: false, error: 'Message is required' });
-        return;
-      }
+    if (!message) {
+      res.status(400).json({ success: false, error: 'Message is required' });
+      return;
+    }
 
-      const systemPrompt = `You are "constructiON AI Assistant", a smart civil engineering companion embedded inside the constructiON platform.
+    const systemPrompt = `You are "constructiON AI Assistant", a smart civil engineering companion embedded inside the constructiON platform.
 Answer the user's questions accurately regarding construction guidelines, building codes, material estimation, and cost optimization.
 You have access to the full conversation so far — use earlier messages to understand follow-up questions
 (e.g. "what about steel?" after discussing cement should be understood in context).
 Keep answers concise, practical, and focused on civil engineering / construction topics.`;
 
-      // Sanitize + cap the incoming history so a bad payload can't blow up the context window
-      const safeHistory: ChatHistoryItem[] = Array.isArray(history)
-        ? history
-            .filter(
-              h =>
-                h &&
-                (h.role === 'user' || h.role === 'assistant') &&
-                typeof h.content === 'string' &&
-                h.content.trim().length > 0,
-            )
-            .slice(-MAX_HISTORY_MESSAGES)
-        : [];
+    // Sanitize + cap the incoming history so a bad payload can't blow up the context window
+    const safeHistory: ChatHistoryItem[] = Array.isArray(history)
+      ? history
+          .filter(
+            h =>
+              h &&
+              (h.role === 'user' || h.role === 'assistant') &&
+              typeof h.content === 'string' &&
+              h.content.trim().length > 0,
+          )
+          .slice(-MAX_HISTORY_MESSAGES)
+      : [];
 
-      const chatCompletion = await groq.chat.completions.create({
+    // --- Server-Sent Events setup ---
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // disable proxy buffering (nginx etc.)
+    res.flushHeaders();
+
+    const sendEvent = (event: string, data: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    let fullReply = '';
+
+    try {
+      const stream = await groq.chat.completions.create({
         messages: [
           { role: 'system', content: systemPrompt },
           ...safeHistory.map(h => ({
@@ -501,15 +587,36 @@ Keep answers concise, practical, and focused on civil engineering / construction
           { role: 'user', content: message },
         ],
         model: 'llama-3.3-70b-versatile',
+        stream: true,
       });
 
-      res.status(200).json({
-        success: true,
-        reply: chatCompletion.choices[0]?.message?.content,
-      });
+      for await (const part of stream) {
+        const token = part.choices[0]?.delta?.content || '';
+        if (token) {
+          fullReply += token;
+          sendEvent('chunk', { token });
+        }
+      }
+
+      if (!fullReply.trim()) {
+        fullReply = 'Sorry, I could not generate a response. Please try again.';
+        sendEvent('chunk', { token: fullReply });
+      }
+
+      // Generate follow-up suggestions only after the main reply is complete,
+      // so it never delays or interferes with the streamed answer.
+      const suggestions = await generateFollowUpSuggestions(message, fullReply);
+
+      sendEvent('done', { success: true, reply: fullReply, suggestions });
+      res.end();
     } catch (error) {
       console.error('AI Chat Error:', error);
-      res.status(500).json({ success: false, error: 'AI failed to respond' });
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: 'AI failed to respond' });
+      } else {
+        sendEvent('error', { success: false, error: 'AI failed to respond' });
+        res.end();
+      }
     }
   },
 );
