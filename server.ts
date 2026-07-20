@@ -39,7 +39,7 @@ const connectDB = async (): Promise<any> => {
 
     const con = await mongoose.connect(dbUri, {
       dbName: 'constructiON',
-      bufferCommands: false, // সার্ভারলেস এনভায়রনমেন্টের জন্য ফলস রাখা বেস্ট
+      bufferCommands: false, // Disable mongoose buffering to avoid memory leaks in serverless
     });
 
     isConnected = !!con.connections[0].readyState;
@@ -97,7 +97,7 @@ const authenticateToken = async (
       return;
     }
 
-    // 🌟 এখানে অন-ডিমান্ড ডাটাবেজ কানেক্ট হবে, তাই কখনো কানেকশন ড্রপ করবে না
+    
     const db = await connectDB();
     if (!db) {
       res.status(500).json({
@@ -107,7 +107,7 @@ const authenticateToken = async (
       return;
     }
 
-    // ১. ডাটাবেজের 'session' কালেকশনে টোকেন চেক
+    // 1. database session collection findOne() call to validate the token and retrieve the session document
     const sessionDoc = await db.collection('session').findOne({ token: token });
 
     if (!sessionDoc) {
@@ -117,13 +117,13 @@ const authenticateToken = async (
       return;
     }
 
-    // সেশন এক্সপায়ার ডেট ভ্যালিডেশন
+    // Check if the session has expired
     if (new Date(sessionDoc.expiresAt) < new Date()) {
       res.status(403).json({ success: false, error: 'Session has expired.' });
       return;
     }
 
-    // ২. সেশনের userId দিয়ে 'user' কালেকশন থেকে ডাটা রিড করা
+    // 2. Retrieve user data using the session's userId
     const searchUserId = sessionDoc.userId.toString();
     let userObjectId: any = null;
 
@@ -150,7 +150,7 @@ const authenticateToken = async (
       return;
     }
 
-    // রিকোয়েস্ট অবজেক্টে ইউজারের ডাটা পুশ
+    // Push user data into the request object
     req.user = {
       id: userDoc._id.toString(),
       email: userDoc.email,
@@ -427,15 +427,32 @@ app.get(
 );
 
 /**
- * DELETE A PROJECT (🔒 Secured)
+ * DELETE A PROJECT (🔒 Secured + Ownership-checked)
  */
 app.delete(
   '/api/projects/:id',
   authenticateToken as any,
-  async (req: AuthRequest, res: Response) => {
+  async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       await connectDB();
       const { id } = req.params;
+
+      const project = await Project.findById(id);
+
+      if (!project) {
+        res.status(404).json({ success: false, error: 'Project not found' });
+        return;
+      }
+
+      // Ownership check — a user may only delete their own projects.
+      if (!req.user || project.userId !== req.user.id) {
+        res.status(403).json({
+          success: false,
+          error: 'You are not authorized to delete this project.',
+        });
+        return;
+      }
+
       await Project.findByIdAndDelete(id);
       res
         .status(200)
