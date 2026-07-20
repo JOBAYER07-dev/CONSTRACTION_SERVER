@@ -39,7 +39,7 @@ const connectDB = async (): Promise<any> => {
 
     const con = await mongoose.connect(dbUri, {
       dbName: 'constructiON',
-      bufferCommands: false, // Disable mongoose buffering to avoid memory leaks in serverless
+      bufferCommands: false, // সার্ভারলেস এনভায়রনমেন্টের জন্য ফলস রাখা বেস্ট
     });
 
     isConnected = !!con.connections[0].readyState;
@@ -97,9 +97,9 @@ const authenticateToken = async (
       return;
     }
 
-    
-    const db = await connectDB();
-    if (!db) {
+    // 🌟 এখানে অন-ডিমান্ড ডাটাবেজ কানেক্ট হবে, তাই কখনো কানেকশন ড্রপ করবে না
+    await connectDB();
+    if (mongoose.connection.readyState !== 1) {
       res.status(500).json({
         success: false,
         error: 'Database connection is not ready or active. Please retry.',
@@ -107,8 +107,17 @@ const authenticateToken = async (
       return;
     }
 
-    // 1. database session collection findOne() call to validate the token and retrieve the session document
-    const sessionDoc = await db.collection('session').findOne({ token: token });
+    // ⚠️ IMPORTANT: Better Auth stores its session/user collections in the
+    // "better-auth" database (see auth.ts → client.db('better-auth')), NOT in
+    // the "constructiON" app database that connectDB() connects to for
+    // Project documents. Reuse the same underlying MongoClient/connection
+    // pool, but point at the correct logical database for this lookup.
+    const authDb = mongoose.connection.getClient().db('better-auth');
+
+    // ১. ডাটাবেজের 'session' কালেকশনে টোকেন চেক
+    const sessionDoc = await authDb
+      .collection('session')
+      .findOne({ token: token });
 
     if (!sessionDoc) {
       res
@@ -117,13 +126,13 @@ const authenticateToken = async (
       return;
     }
 
-    // Check if the session has expired
+    // সেশন এক্সপায়ার ডেট ভ্যালিডেশন
     if (new Date(sessionDoc.expiresAt) < new Date()) {
       res.status(403).json({ success: false, error: 'Session has expired.' });
       return;
     }
 
-    // 2. Retrieve user data using the session's userId
+    // ২. সেশনের userId দিয়ে 'user' কালেকশন থেকে ডাটা রিড করা
     const searchUserId = sessionDoc.userId.toString();
     let userObjectId: any = null;
 
@@ -135,7 +144,7 @@ const authenticateToken = async (
       // Ignore conversion error
     }
 
-    const userDoc = await db.collection('user').findOne({
+    const userDoc = await authDb.collection('user').findOne({
       $or: [
         { _id: searchUserId },
         ...(userObjectId ? [{ _id: userObjectId }] : []),
@@ -150,7 +159,7 @@ const authenticateToken = async (
       return;
     }
 
-    // Push user data into the request object
+    // রিকোয়েস্ট অবজেক্টে ইউজারের ডাটা পুশ
     req.user = {
       id: userDoc._id.toString(),
       email: userDoc.email,
