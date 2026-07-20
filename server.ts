@@ -52,18 +52,24 @@ const connectDB = async (): Promise<any> => {
 };
 
 // --- Mongoose Schemas & Models ---
-const ProjectSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  image: { type: String, required: true },
-  area: { type: Number, required: true },
-  buildingType: { type: String, required: true },
-  location: { type: String, required: true },
-  aiEstimate: { type: String, required: true },
-  userId: { type: String, required: true },
-}, { timestamps: true });
+const ProjectSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true },
+    shortDescription: { type: String, required: true },
+    fullDescription: { type: String, required: true },
+    image: { type: String, required: true },
+    area: { type: Number, required: true },
+    buildingType: { type: String, required: true },
+    location: { type: String, required: true },
+    aiEstimate: { type: String, required: true },
+    userId: { type: String, required: true },
+  },
+  { timestamps: true },
+);
 
 // Avoid Model Overwrite Errors in Serverless Redeploys
-const Project = mongoose.models.Project || mongoose.model('Project', ProjectSchema);
+const Project =
+  mongoose.models.Project || mongoose.model('Project', ProjectSchema);
 
 // --- Extended Request Interface for TypeScript ---
 interface AuthRequest extends Request {
@@ -75,13 +81,19 @@ interface AuthRequest extends Request {
 }
 
 // --- 🔒 Better Auth Token Middleware (Fully Serverless Patch) ---
-const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+const authenticateToken = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
   try {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer <token>
 
     if (!token) {
-      res.status(401).json({ success: false, error: 'Access denied. No token provided.' });
+      res
+        .status(401)
+        .json({ success: false, error: 'Access denied. No token provided.' });
       return;
     }
 
@@ -90,7 +102,7 @@ const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunc
     if (!db) {
       res.status(500).json({
         success: false,
-        error: 'Database connection is not ready or active. Please retry.'
+        error: 'Database connection is not ready or active. Please retry.',
       });
       return;
     }
@@ -99,7 +111,9 @@ const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunc
     const sessionDoc = await db.collection('session').findOne({ token: token });
 
     if (!sessionDoc) {
-      res.status(403).json({ success: false, error: 'Invalid token or session expired.' });
+      res
+        .status(403)
+        .json({ success: false, error: 'Invalid token or session expired.' });
       return;
     }
 
@@ -125,12 +139,14 @@ const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunc
       $or: [
         { _id: searchUserId },
         ...(userObjectId ? [{ _id: userObjectId }] : []),
-        { id: searchUserId }
-      ]
+        { id: searchUserId },
+      ],
     });
 
     if (!userDoc) {
-      res.status(404).json({ success: false, error: 'Associated user not found.' });
+      res
+        .status(404)
+        .json({ success: false, error: 'Associated user not found.' });
       return;
     }
 
@@ -138,13 +154,15 @@ const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunc
     req.user = {
       id: userDoc._id.toString(),
       email: userDoc.email,
-      name: userDoc.name
+      name: userDoc.name,
     };
 
     next();
   } catch (error) {
     console.error('Auth Middleware Error:', error);
-    res.status(500).json({ success: false, error: 'Authentication internal error.' });
+    res
+      .status(500)
+      .json({ success: false, error: 'Authentication internal error.' });
   }
 };
 
@@ -162,55 +180,83 @@ app.get('/', async (req: Request, res: Response) => {
 /**
  * FEATURE A: AI Cost & Material Generator + Save Project (🔒 Secured)
  */
-app.post('/api/projects/add', authenticateToken as any, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { title, image, area, buildingType, location, userId } = req.body;
+app.post(
+  '/api/projects/add',
+  authenticateToken as any,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const {
+        title,
+        shortDescription,
+        fullDescription,
+        image,
+        area,
+        buildingType,
+        location,
+        userId,
+      } = req.body;
 
-    if (!title || !image || !area || !buildingType || !location || !userId) {
-      res.status(400).json({ success: false, error: 'All fields are required including userId' });
-      return;
-    }
+      if (
+        !title ||
+        !shortDescription ||
+        !fullDescription ||
+        !image ||
+        !area ||
+        !buildingType ||
+        !location ||
+        !userId
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'All fields are required including userId',
+        });
+        return;
+      }
 
-    const prompt = `You are an expert civil engineer and cost estimator. 
+      const prompt = `You are an expert civil engineer and cost estimator. 
     Create a highly detailed, professional structural material and cost estimation for a ${area} sqft ${buildingType} building located in ${location}. 
     Provide estimated breakdown quantities for: Cement (bags), Steel (tons), Sand (cft), Bricks (pcs), and Total Estimated Budget in BDT.
     Format the response using clean Markdown headers (###) and bullet points. Do not include introductory chit-chat, start directly with the report.`;
 
-    // Call Groq API
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'llama-3.3-70b-versatile',
-    });
+      // Call Groq API
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'llama-3.3-70b-versatile',
+      });
 
-    const generatedText = chatCompletion.choices[0]?.message?.content || 'Failed to generate estimate due to an AI error.';
+      const generatedText =
+        chatCompletion.choices[0]?.message?.content ||
+        'Failed to generate estimate due to an AI error.';
 
-    // Ensure database is ready before creating a model document
-    await connectDB();
+      // Ensure database is ready before creating a model document
+      await connectDB();
 
-    // Save to MongoDB
-    const newProject = new Project({
-      title,
-      image,
-      area,
-      buildingType,
-      location,
-      aiEstimate: generatedText,
-      userId
-    });
+      // Save to MongoDB
+      const newProject = new Project({
+        title,
+        shortDescription,
+        fullDescription,
+        image,
+        area,
+        buildingType,
+        location,
+        aiEstimate: generatedText,
+        userId,
+      });
 
-    await newProject.save();
+      await newProject.save();
 
-    res.status(201).json({
-      success: true,
-      message: 'Project created and AI estimate generated successfully!',
-      data: newProject
-    });
-
-  } catch (error) {
-    console.error('Add Project Error:', error);
-    res.status(500).json({ success: false, error: 'Internal Server Error' });
-  }
-});
+      res.status(201).json({
+        success: true,
+        message: 'Project created and AI estimate generated successfully!',
+        data: newProject,
+      });
+    } catch (error) {
+      console.error('Add Project Error:', error);
+      res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+  },
+);
 
 /**
  * GET ALL PROJECTS (Explore Page)
@@ -246,64 +292,85 @@ app.get('/api/projects', async (req: AuthRequest, res: Response) => {
 /**
  * GET SINGLE PROJECT DETAILS
  */
-app.get('/api/projects/:id', async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    await connectDB();
-    const { id } = req.params;
-    const project = await Project.findById(id);
+app.get(
+  '/api/projects/:id',
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      await connectDB();
+      const { id } = req.params;
+      const project = await Project.findById(id);
 
-    if (!project) {
-      res.status(404).json({ success: false, error: 'Project not found' });
-      return;
+      if (!project) {
+        res.status(404).json({ success: false, error: 'Project not found' });
+        return;
+      }
+
+      res.status(200).json({ success: true, data: project });
+    } catch (error) {
+      res
+        .status(500)
+        .json({ success: false, error: 'Failed to fetch project details' });
     }
-
-    res.status(200).json({ success: true, data: project });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to fetch project details' });
-  }
-});
+  },
+);
 
 /**
  * DELETE A PROJECT (🔒 Secured)
  */
-app.delete('/api/projects/:id', authenticateToken as any, async (req: AuthRequest, res: Response) => {
-  try {
-    await connectDB();
-    const { id } = req.params;
-    await Project.findByIdAndDelete(id);
-    res.status(200).json({ success: true, message: 'Project deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to delete project' });
-  }
-});
+app.delete(
+  '/api/projects/:id',
+  authenticateToken as any,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      await connectDB();
+      const { id } = req.params;
+      await Project.findByIdAndDelete(id);
+      res
+        .status(200)
+        .json({ success: true, message: 'Project deleted successfully' });
+    } catch (error) {
+      res
+        .status(500)
+        .json({ success: false, error: 'Failed to delete project' });
+    }
+  },
+);
 
 /**
  * FEATURE C: AI Smart Construction Assistant / Chatbot
  */
-app.post('/api/ai/chat', async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { message } = req.body;
+app.post(
+  '/api/ai/chat',
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { message } = req.body;
 
-    if (!message) {
-      res.status(400).json({ success: false, error: 'Message is required' });
-      return;
-    }
+      if (!message) {
+        res.status(400).json({ success: false, error: 'Message is required' });
+        return;
+      }
 
-    const prompt = `You are "ConstructIQ AI Assistant", a smart civil engineering companion. 
+      const prompt = `You are "ConstructIQ AI Assistant", a smart civil engineering companion. 
     Answer the user's question accurately regarding construction guidelines, building codes, material estimation, or cost optimization.
     User Question: "${message}"`;
 
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'llama-3.3-70b-versatile',
-    });
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'llama-3.3-70b-versatile',
+      });
 
-    res.status(200).json({ success: true, reply: chatCompletion.choices[0]?.message?.content });
-  } catch (error) {
-    console.error('AI Chat Error:', error);
-    res.status(500).json({ success: false, error: 'AI failed to respond' });
-  }
-});
+      res
+        .status(200)
+        .json({
+          success: true,
+          reply: chatCompletion.choices[0]?.message?.content,
+        });
+    } catch (error) {
+      console.error('AI Chat Error:', error);
+      res.status(500).json({ success: false, error: 'AI failed to respond' });
+    }
+  },
+);
 
 // Start Server
 app.listen(PORT, () => {
