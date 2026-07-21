@@ -2,10 +2,26 @@
 
 Backend API for **constractiON AI**, an AI-powered construction cost estimation and project management platform. This server provides authentication, AI-generated construction estimates, project management APIs, and an intelligent construction assistant powered by Groq AI.
 
-## 🌐 Live Links
+# 🌐 Live Demo
 
-- **Frontend:** https://constraction-client.vercel.app/
-- **Backend API:** https://your-backend-url.onrender.com
+**Live Website:** https://constraction-client.vercel.app
+
+**Frontend Repository:** https://github.com/JOBAYER07-dev/CONSTRACTION_CLIENT
+
+**Backend Repository:** https://github.com/JOBAYER07-dev/CONSTRACTION_SERVER
+
+### ⚡ Backend API
+
+https://constraction-server.onrender.com
+
+---
+
+# 🔑 Demo Credentials
+
+You can log in instantly using the **Demo Login** button on the login page (auto-fills credentials), or manually use:
+
+**Email:** d@d.com
+**Password:** D12345678
 
 ---
 
